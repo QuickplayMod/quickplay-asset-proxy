@@ -1,0 +1,22 @@
+version: '3.8'
+services:
+  redis:
+    image: redis:6
+    ports:
+      - "6379:6379"
+    restart: unless-stopped
+    volumes:
+      - ../redis-volume:/var/lib/redis
+  proxy:
+    image: quickplaymod/quickplay-asset-proxy
+    ports:
+      - "32182:80"
+    restart: unless-stopped
+    volumes:
+      - .:/usr/src/app
+      - /usr/src/app/node_modules
+    command: npm run dev
+    depends_on:
+      - redis
+    env_file:
+      - .env
