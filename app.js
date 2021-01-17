@@ -119,7 +119,7 @@ app.get('/name/:uuid', async (req, res) => {
 			name = names.data[names.data.length-1].name
 		} else {
 			name = ''
-			console.warn('Non-200 response received for name request.')
+			console.warn('Non-200 response received for name request. Received: ' + res.status)
 		}
 
 		res.contentType('text/plain')
