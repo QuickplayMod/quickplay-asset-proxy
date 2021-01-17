@@ -2,6 +2,7 @@ require('dotenv').config()
 const express = require('express')
 const { ShareServiceClient, StorageSharedKeyCredential } = require('@azure/storage-file-share')
 const Redis = require('ioredis')
+const axios = require('axios')
 
 const redis = new Redis(6379, process.env.REDIS_HOST)
 
@@ -18,7 +19,7 @@ async function getFileFromShare(shareName, fileName) {
 	return await fileClient.downloadToBuffer()
 }
 
-async function saveToCache(buf, path) {
+async function saveGlyphToCache(buf, path) {
 	const data = {
 		created: Date.now(),
 		base64: buf.toString('base64')
@@ -26,7 +27,7 @@ async function saveToCache(buf, path) {
 	await redis.hset('glyphcache', path, JSON.stringify(data))
 }
 
-async function readFromCache(path) {
+async function readGlyphFromCache(path) {
 	const json = await redis.hget('glyphcache', path)
 	if(json == null) {
 		return null
@@ -40,8 +41,29 @@ async function readFromCache(path) {
 	return Buffer.from(data.base64, 'base64')
 }
 
+async function readNameFromCache(uuid) {
+	const json = await redis.hget('namecache', uuid)
+	if(json == null) {
+		return null
+	}
+
+	const data = JSON.parse(json)
+	if(data.created < Date.now() - process.env.NAME_CACHE_TTL) {
+		return null
+	}
+	return data.name
+}
+
+async function saveNameToCache(name, uuid) {
+	const data = {
+		created: Date.now(),
+		name: name
+	}
+	await redis.hset('namecache', uuid, JSON.stringify(data))
+}
+
 async function getGlyph(fileName) {
-	const cachedGlyph = await readFromCache(fileName)
+	const cachedGlyph = await readGlyphFromCache(fileName)
 	if(cachedGlyph != null) {
 		return cachedGlyph
 	}
@@ -49,7 +71,7 @@ async function getGlyph(fileName) {
 	if(process.env.DEBUG_MODE) {
 		console.log('Downloaded glyph ' + fileName)
 	}
-	await saveToCache(downloadedGlyph, fileName)
+	await saveGlyphToCache(downloadedGlyph, fileName)
 	return downloadedGlyph
 }
 
@@ -65,6 +87,47 @@ app.get('/glyph/:img', async (req, res) => {
 			res.sendStatus(500)
 			console.error(e)
 		}
+	}
+})
+
+let mojangRequestsPast10Minutes = 0
+setInterval(() => {
+	mojangRequestsPast10Minutes = 0
+}, 600000)
+
+app.get('/name/:uuid', async (req, res) => {
+	if(!req.params.uuid || (req.params.uuid.length !== 32 && req.params.uuid.length !== 36)) {
+		res.sendStatus(400)
+	}
+	const cachedName = await readNameFromCache(req.params.uuid)
+	if(cachedName || cachedName === '') {
+		res.send(cachedName)
+		return
+	}
+
+	if(mojangRequestsPast10Minutes > 550) {
+		res.sendStatus(500)
+		return
+	}
+	console.log('Requesting Mojang API for user ' + req.params.uuid)
+
+	try {
+		mojangRequestsPast10Minutes++
+		const names = await axios.get(`https://api.mojang.com/user/profiles/${req.params.uuid}/names`)
+		let name
+		if(res.status === 200) {
+			name = names.data[names.data.length-1].name
+		} else {
+			name = ''
+		}
+
+		res.contentType('text/plain')
+		res.send(name)
+		await saveNameToCache(name, req.params.uuid)
+	} catch(e) {
+		console.error(e)
+		res.sendStatus(e.status)
+		await saveNameToCache('', req.params.uuid)
 	}
 })
 
