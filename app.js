@@ -115,11 +115,10 @@ app.get('/name/:uuid', async (req, res) => {
 		mojangRequestsPast10Minutes++
 		const names = await axios.get(`https://api.mojang.com/user/profiles/${req.params.uuid}/names`)
 		let name
-		if(res.status === 200) {
+		if(names.status === 200) {
 			name = names.data[names.data.length-1].name
 		} else {
 			name = ''
-			console.warn('Non-200 response received for name request. Received: ' + res.status)
 		}
 
 		res.contentType('text/plain')
